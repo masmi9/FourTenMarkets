@@ -1,0 +1,265 @@
+// FourTen Markets — Prisma Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// User & Wallet
+// ─────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+
+  wallet       Wallet?
+  betRequests  BetRequest[]
+  bets         Bet[]
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model Wallet {
+  id            String        @id @default(cuid())
+  userId        String        @unique
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance       Decimal       @default(0) @db.Decimal(12, 2)
+  lockedBalance Decimal       @default(0) @db.Decimal(12, 2)
+  updatedAt     DateTime      @updatedAt
+
+  transactions  Transaction[]
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  walletId    String
+  wallet      Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  amount      Decimal         @db.Decimal(12, 2)
+  reference   String?         // betId, requestId, etc.
+  description String?
+  createdAt   DateTime        @default(now())
+
+  @@index([walletId, createdAt])
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  BET_STAKE
+  BET_PAYOUT
+  BET_REFUND
+}
+
+// ─────────────────────────────────────────
+// Sports & Events
+// ─────────────────────────────────────────
+
+model Sport {
+  id      String   @id @default(cuid())
+  name    String   @unique
+  slug    String   @unique
+  key     String   @unique  // The Odds API key (e.g. "basketball_nba")
+
+  leagues League[]
+}
+
+model League {
+  id      String  @id @default(cuid())
+  sportId String
+  sport   Sport   @relation(fields: [sportId], references: [id], onDelete: Cascade)
+  name    String
+  slug    String  @unique
+  country String?
+
+  events  Event[]
+}
+
+model Event {
+  id          String      @id @default(cuid())
+  leagueId    String
+  league      League      @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  homeTeam    String
+  awayTeam    String
+  startTime   DateTime
+  status      EventStatus @default(UPCOMING)
+  externalId  String?     @unique  // The Odds API event id
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  markets     Market[]
+
+  @@index([status, startTime])
+}
+
+enum EventStatus {
+  UPCOMING
+  LIVE
+  SETTLED
+  CANCELLED
+}
+
+// ─────────────────────────────────────────
+// Markets & Odds
+// ─────────────────────────────────────────
+
+model Market {
+  id      String       @id @default(cuid())
+  eventId String
+  event   Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name    String
+  type    MarketType
+  status  MarketStatus @default(OPEN)
+
+  selections Selection[]
+  positions  Position[]
+}
+
+enum MarketType {
+  MONEYLINE
+  SPREAD
+  TOTAL
+  PLAYER_PROP
+}
+
+enum MarketStatus {
+  OPEN
+  SUSPENDED
+  CLOSED
+}
+
+model Selection {
+  id       String  @id @default(cuid())
+  marketId String
+  market   Market  @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  name     String  // e.g. "Home Win", "Over", "De'Aaron Fox - Over"
+  line     String? // e.g. "21.5" for props/totals
+
+  oddsLines     OddsLine[]
+  consensusOdds ConsensusOdds?
+  betRequests   BetRequest[]
+  bets          Bet[]
+  position      Position?
+}
+
+model OddsLine {
+  id          String   @id @default(cuid())
+  selectionId String
+  selection   Selection @relation(fields: [selectionId], references: [id], onDelete: Cascade)
+  bookmaker   String
+  odds        Int      // American odds (e.g. -110, +150)
+  impliedProb Decimal  @db.Decimal(8, 6)
+  fetchedAt   DateTime @default(now())
+
+  @@index([selectionId, fetchedAt])
+}
+
+model ConsensusOdds {
+  id            String    @id @default(cuid())
+  selectionId   String    @unique
+  selection     Selection @relation(fields: [selectionId], references: [id], onDelete: Cascade)
+  odds          Int       // American odds
+  impliedProb   Decimal   @db.Decimal(8, 6)
+  lineMovement  Decimal   @default(0) @db.Decimal(6, 4)  // % change in 24h
+  updatedAt     DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────
+// Betting
+// ─────────────────────────────────────────
+
+model BetRequest {
+  id            String            @id @default(cuid())
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selectionId   String
+  selection     Selection         @relation(fields: [selectionId], references: [id])
+  requestedOdds Int               // American odds user wants
+  stake         Decimal           @db.Decimal(12, 2)
+  status        BetRequestStatus  @default(PENDING)
+  counteredOdds Int?              // Platform's counter offer
+  responseType  String?           // "ACCEPT" | "COUNTER" | "REJECT"
+  processedAt   DateTime?
+  expiresAt     DateTime?         // Counter offer expires after 2 minutes
+  createdAt     DateTime          @default(now())
+
+  bet           Bet?
+}
+
+enum BetRequestStatus {
+  PENDING
+  ACCEPTED
+  COUNTERED
+  REJECTED
+  EXPIRED
+  CONFIRMED
+}
+
+model Bet {
+  id             String    @id @default(cuid())
+  betRequestId   String    @unique
+  betRequest     BetRequest @relation(fields: [betRequestId], references: [id])
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+  selectionId    String
+  selection      Selection @relation(fields: [selectionId], references: [id])
+  odds           Int       // Final odds (American)
+  stake          Decimal   @db.Decimal(12, 2)
+  potentialPayout Decimal  @db.Decimal(12, 2)
+  status         BetStatus @default(ACTIVE)
+  placedAt       DateTime  @default(now())
+
+  settlement     Settlement?
+
+  @@index([userId, status])
+  @@index([selectionId, status])
+}
+
+enum BetStatus {
+  ACTIVE
+  WON
+  LOST
+  VOIDED
+}
+
+// ─────────────────────────────────────────
+// Risk & Settlement
+// ─────────────────────────────────────────
+
+model Position {
+  id             String    @id @default(cuid())
+  marketId       String
+  market         Market    @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  selectionId    String    @unique
+  selection      Selection @relation(fields: [selectionId], references: [id], onDelete: Cascade)
+  totalExposure  Decimal   @default(0) @db.Decimal(12, 2)  // Total staked on this selection
+  totalLiability Decimal   @default(0) @db.Decimal(12, 2)  // Platform pays if this wins
+  updatedAt      DateTime  @updatedAt
+}
+
+model Settlement {
+  id         String           @id @default(cuid())
+  betId      String           @unique
+  bet        Bet              @relation(fields: [betId], references: [id])
+  result     SettlementResult
+  payout     Decimal          @db.Decimal(12, 2)
+  settledAt  DateTime         @default(now())
+}
+
+enum SettlementResult {
+  WON
+  LOST
+  VOID
+}
