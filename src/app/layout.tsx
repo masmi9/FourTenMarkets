@@ -7,6 +7,10 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "FourTen Markets",
   description: "Sports betting exchange — propose your own odds",
+  icons: {
+    icon: "/FourTen_Logo.png",
+    apple: "/FourTen_Logo.png",
+  },
 };
 
 export default function RootLayout({

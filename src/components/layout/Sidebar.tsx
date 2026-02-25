@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
@@ -26,9 +27,16 @@ export default function Sidebar({ role, balance }: SidebarProps) {
   return (
     <aside className="w-60 min-h-screen bg-brand-surface border-r border-border flex flex-col">
       {/* Logo */}
-      <div className="p-5 border-b border-border">
-        <Link href="/dashboard" className="text-xl font-bold">
-          <span className="text-brand-green">FourTen</span> Markets
+      <div className="px-4 py-3 border-b border-border">
+        <Link href="/dashboard" className="flex items-center justify-center">
+          <Image
+            src="/FourTen_Logo.png"
+            alt="FourTen Markets"
+            width={130}
+            height={65}
+            priority
+            className="drop-shadow-md"
+          />
         </Link>
       </div>
 

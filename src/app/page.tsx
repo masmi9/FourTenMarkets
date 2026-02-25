@@ -1,13 +1,19 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-brand-dark">
       <div className="text-center space-y-6 max-w-2xl px-6">
-        <div className="space-y-2">
-          <h1 className="text-5xl font-bold tracking-tight">
-            <span className="text-brand-green">FourTen</span> Markets
-          </h1>
+        <div className="space-y-4 flex flex-col items-center">
+          <Image
+            src="/FourTen_Logo.png"
+            alt="FourTen Markets"
+            width={220}
+            height={220}
+            priority
+            className="drop-shadow-2xl"
+          />
           <p className="text-xl text-muted-foreground">
             Propose your own odds. The exchange responds in real time.
           </p>

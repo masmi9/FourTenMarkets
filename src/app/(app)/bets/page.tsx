@@ -2,6 +2,22 @@ import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatOdds } from "@/lib/odds-utils";
+import { Prisma } from "@prisma/client";
+
+type BetWithRelations = Prisma.BetGetPayload<{
+  include: {
+    selection: {
+      include: {
+        market: {
+          include: {
+            event: { include: { league: { include: { sport: true } } } };
+          };
+        };
+      };
+    };
+    settlement: true;
+  };
+}>;
 
 export default async function BetsPage() {
   const user = await getAuthUser();
@@ -92,7 +108,7 @@ export default async function BetsPage() {
   );
 }
 
-function BetRow({ bet }: { bet: Awaited<ReturnType<typeof getBetType>> }) {
+function BetRow({ bet }: { bet: BetWithRelations }) {
   const stake = parseFloat(bet.stake.toString());
   const payout = parseFloat(bet.potentialPayout.toString());
   const actualPayout = bet.settlement
@@ -153,23 +169,3 @@ function BetRow({ bet }: { bet: Awaited<ReturnType<typeof getBetType>> }) {
   );
 }
 
-// Helper for type inference
-async function getBetType() {
-  return {} as Awaited<
-    ReturnType<typeof prisma.bet.findFirst>
-  > & {
-    selection: {
-      name: string;
-      line: string | null;
-      market: {
-        name: string;
-        event: {
-          homeTeam: string;
-          awayTeam: string;
-          league: { sport: { name: string } };
-        };
-      };
-    };
-    settlement: { payout: unknown } | null;
-  };
-}
