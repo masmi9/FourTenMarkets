@@ -2,6 +2,8 @@ import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
+import { ParlayProvider } from "@/context/ParlayContext";
+import ParlaySlip from "@/components/parlay-slip/ParlaySlip";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getAuthUser();
@@ -16,11 +18,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     : 0;
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar role={user.role} balance={available} />
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
-    </div>
+    <ParlayProvider>
+      <div className="flex min-h-screen">
+        <Sidebar role={user.role} balance={available} />
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
+      <ParlaySlip />
+    </ParlayProvider>
   );
 }

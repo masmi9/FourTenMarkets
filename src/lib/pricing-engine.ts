@@ -8,19 +8,19 @@
 
 import { safeGet, safeSet, safeIncrByFloat, redisKeys } from "./redis";
 import { prisma } from "./prisma";
-import { oddsToImpliedProb, impliedProbToOdds, applyMargin, calcPayout } from "./odds-utils";
+import { oddsToImpliedProb, impliedProbToOdds, calcPayout } from "./odds-utils";
 
 // ─────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────
 
-const EDGE_ACCEPT_THRESHOLD = 0.02;
-const EDGE_COUNTER_THRESHOLD = -0.05;
+export const EDGE_ACCEPT_THRESHOLD = 0.02;
+export const EDGE_COUNTER_THRESHOLD = -0.05;
 const PLATFORM_MARGIN = 0.04;
 const MAX_SELECTION_EXPOSURE = 50_000;
 const EXPOSURE_WARN_FRACTION = 0.9;
-const MAX_BET_STAKE = 5_000;
-const MAX_DAILY_STAKE = 25_000;
+export const MAX_BET_STAKE = 5_000;
+export const MAX_DAILY_STAKE = 25_000;
 
 // ─────────────────────────────────────────
 // Types
@@ -47,7 +47,7 @@ export interface PricingInput {
 // Consensus odds — Redis first, DB fallback
 // ─────────────────────────────────────────
 
-async function getConsensusOdds(selectionId: string): Promise<number | null> {
+export async function getConsensusOdds(selectionId: string): Promise<number | null> {
   const cached = await safeGet(redisKeys.odds(selectionId));
   if (cached) return parseInt(cached, 10);
 
@@ -70,7 +70,7 @@ async function getCurrentExposure(selectionId: string): Promise<number> {
   return position ? parseFloat(position.totalLiability.toString()) : 0;
 }
 
-async function getDailyStake(userId: string): Promise<number> {
+export async function getDailyStake(userId: string): Promise<number> {
   const cached = await safeGet(redisKeys.dailyStake(userId));
   return parseFloat(cached ?? "0");
 }
@@ -93,7 +93,7 @@ export async function evaluateBetRequest(input: PricingInput): Promise<PricingRe
 
   const consensusOdds = await getConsensusOdds(selectionId);
   if (!consensusOdds) {
-    return counterOffer(requestedOdds, stake, -110, "No consensus odds available — offering standard line");
+    return counterOffer(requestedOdds, stake, -110, 0, "No consensus odds available — offering standard line");
   }
 
   const userImpliedProb = oddsToImpliedProb(requestedOdds);
@@ -119,10 +119,14 @@ export async function evaluateBetRequest(input: PricingInput): Promise<PricingRe
   }
 
   if (edge >= EDGE_COUNTER_THRESHOLD || nearCapacity) {
+    // Near-capacity: pull all the way to consensus floor (conservative).
+    // Otherwise pass the real edge so the counter can rationalize a middle value.
+    const effectiveEdge = nearCapacity ? EDGE_COUNTER_THRESHOLD : edge;
     return counterOffer(
       requestedOdds,
       stake,
       consensusOdds,
+      effectiveEdge,
       nearCapacity ? "Near exposure limit — best available odds" : undefined
     );
   }
@@ -138,12 +142,27 @@ function counterOffer(
   requestedOdds: number,
   stake: number,
   consensusOdds: number,
+  edge: number,
   reason?: string
 ): PricingResult {
-  const fairProb = oddsToImpliedProb(consensusOdds);
-  const counterOdds = roundToNearest5(
-    applyMargin(impliedProbToOdds(fairProb), PLATFORM_MARGIN)
-  );
+  const userProb = oddsToImpliedProb(requestedOdds);
+  const consensusProb = oddsToImpliedProb(consensusOdds);
+
+  // Determine how deep into the counter zone this request sits.
+  //   position = 0 → at reject boundary (edge = EDGE_COUNTER_THRESHOLD) → consensus floor
+  //   position = 1 → at accept boundary (edge = EDGE_ACCEPT_THRESHOLD)  → honor requested odds
+  // This lets the engine rationalize a proportional middle value rather than
+  // always flooring at consensus.
+  const edgeRange = EDGE_ACCEPT_THRESHOLD - EDGE_COUNTER_THRESHOLD; // 0.07
+  const position = Math.max(0, Math.min(1, (edge - EDGE_COUNTER_THRESHOLD) / edgeRange));
+
+  // Interpolate implied probability between consensus and what the user asked for.
+  const targetProb = consensusProb + position * (userProb - consensusProb);
+  const interpolatedOdds = roundToNearest5(impliedProbToOdds(targetProb));
+
+  // Floor at consensus — the platform never counters below the displayed market line.
+  const counterOdds = Math.max(consensusOdds, interpolatedOdds);
+
   return {
     decision: "COUNTER",
     acceptedOdds: counterOdds,

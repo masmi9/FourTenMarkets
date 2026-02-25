@@ -9,6 +9,7 @@
     "lint": "next lint",
     "db:push": "npx prisma@6.3.0 db push",
     "db:seed": "npx ts-node prisma/seed.ts",
+    "db:seed-nba": "npx ts-node prisma/seed-nba.ts",
     "db:studio": "npx prisma@6.3.0 studio",
     "db:generate": "npx prisma@6.3.0 generate"
   },

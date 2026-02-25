@@ -48,6 +48,29 @@ export const betConfirmSchema = z.object({
   requestId: z.string().min(1, "Request ID is required"),
 });
 
+export const parlayRequestSchema = z.object({
+  legs: z
+    .array(
+      z.object({
+        selectionId: z.string().min(1),
+        requestedOdds: z
+          .number()
+          .int()
+          .refine((v) => v >= 100 || v <= -100, "Odds must be American format"),
+      })
+    )
+    .min(2, "Parlay requires at least 2 legs")
+    .max(12, "Parlay maximum is 12 legs"),
+  stake: z
+    .number()
+    .positive("Stake must be positive")
+    .max(5000, "Maximum parlay stake is $5,000"),
+});
+
+export const parlayConfirmSchema = z.object({
+  parlayId: z.string().min(1, "Parlay ID is required"),
+});
+
 export const settleEventSchema = z.object({
   eventId: z.string().min(1, "Event ID is required"),
   results: z.record(z.string(), z.enum(["WON", "LOST", "VOID"])),

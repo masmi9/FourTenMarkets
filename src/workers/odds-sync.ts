@@ -27,7 +27,8 @@ const ODDS_API_KEY = process.env.ODDS_API_KEY ?? "";
 
 interface OddsApiOutcome {
   name: string;
-  price: number;  // decimal odds
+  price: number;  // American odds (when oddsFormat=american)
+  point?: number; // spread/total line
 }
 
 interface OddsApiBookmaker {
@@ -67,8 +68,8 @@ async function syncOddsForSport(sportKey: string): Promise<number> {
         params: {
           apiKey: ODDS_API_KEY,
           regions: "us",
-          markets: "h2h",
-          oddsFormat: "decimal",
+          markets: "h2h,spreads,totals",
+          oddsFormat: "american",
         },
         timeout: 10_000,
       }
@@ -80,7 +81,7 @@ async function syncOddsForSport(sportKey: string): Promise<number> {
   }
 
   for (const apiEvent of oddsData) {
-    // Find event in DB by externalId
+    // Find event in DB by externalId, load all market types
     const event = await prisma.event.findFirst({
       where: {
         externalId: apiEvent.id,
@@ -88,76 +89,72 @@ async function syncOddsForSport(sportKey: string): Promise<number> {
       },
       include: {
         markets: {
-          where: { type: "MONEYLINE" },
+          where: { type: { in: ["MONEYLINE", "SPREAD", "TOTAL"] } },
           include: { selections: true },
         },
       },
     });
 
-    if (!event || event.markets.length === 0) continue;
+    if (!event) continue;
 
-    const moneylineMarket = event.markets[0];
+    // Map: apiMarketKey → { dbMarketType, selectionKey }
+    // selectionKey = outcome.name for h2h/spreads; "Over"/"Under" for totals
+    const marketMapping: Array<{
+      apiKey: string;
+      dbType: "MONEYLINE" | "SPREAD" | "TOTAL";
+    }> = [
+      { apiKey: "h2h",     dbType: "MONEYLINE" },
+      { apiKey: "spreads", dbType: "SPREAD"    },
+      { apiKey: "totals",  dbType: "TOTAL"     },
+    ];
 
-    // Aggregate implied probabilities across bookmakers
-    const selectionProbs: Record<string, number[]> = {};
+    for (const { apiKey, dbType } of marketMapping) {
+      const dbMarket = event.markets.find((m) => m.type === dbType);
+      if (!dbMarket) continue;
 
-    for (const bookmaker of apiEvent.bookmakers) {
-      const h2hMarket = bookmaker.markets.find((m) => m.key === "h2h");
-      if (!h2hMarket) continue;
+      // Aggregate implied probs per selection name across all bookmakers
+      const selectionProbs: Record<string, number[]> = {};
 
-      for (const outcome of h2hMarket.outcomes) {
-        const impliedProb = 1 / outcome.price;  // decimal odds → implied prob
-        if (!selectionProbs[outcome.name]) selectionProbs[outcome.name] = [];
-        selectionProbs[outcome.name].push(impliedProb);
+      for (const bookmaker of apiEvent.bookmakers) {
+        const bkMkt = bookmaker.markets.find((m) => m.key === apiKey);
+        if (!bkMkt) continue;
+        for (const outcome of bkMkt.outcomes) {
+          // American odds → implied prob (price is American integer)
+          const impliedProb = outcome.price > 0
+            ? 100 / (outcome.price + 100)
+            : Math.abs(outcome.price) / (Math.abs(outcome.price) + 100);
+          if (!selectionProbs[outcome.name]) selectionProbs[outcome.name] = [];
+          selectionProbs[outcome.name].push(impliedProb);
+        }
       }
-    }
 
-    // For each selection, calculate consensus odds
-    for (const selection of moneylineMarket.selections) {
-      const probs = selectionProbs[selection.name];
-      if (!probs || probs.length === 0) continue;
+      for (const selection of dbMarket.selections) {
+        const probs = selectionProbs[selection.name];
+        if (!probs || probs.length === 0) continue;
 
-      const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
-      const consensusOdds = impliedProbToOdds(avgProb);
+        const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
+        const consensusOdds = impliedProbToOdds(avgProb);
 
-      // Get previous consensus for line movement
-      const prev = await prisma.consensusOdds.findUnique({
-        where: { selectionId: selection.id },
-      });
+        const prev = await prisma.consensusOdds.findUnique({ where: { selectionId: selection.id } });
+        const prevProb = prev ? parseFloat(prev.impliedProb.toString()) : avgProb;
+        const lineMovement = prevProb > 0 ? (avgProb - prevProb) / prevProb : 0;
 
-      const prevProb = prev ? parseFloat(prev.impliedProb.toString()) : avgProb;
-      const lineMovement = prevProb > 0 ? (avgProb - prevProb) / prevProb : 0;
-
-      // Upsert consensus
-      await prisma.consensusOdds.upsert({
-        where: { selectionId: selection.id },
-        create: {
-          selectionId: selection.id,
-          odds: consensusOdds,
-          impliedProb: avgProb,
-          lineMovement,
-        },
-        update: {
-          odds: consensusOdds,
-          impliedProb: avgProb,
-          lineMovement,
-        },
-      });
-
-      // Cache in Redis with 120s TTL
-      await redis.set(`odds:${selection.id}`, consensusOdds.toString(), "EX", 120);
-
-      // Auto-suspend if line moved >10% in this cycle
-      if (Math.abs(lineMovement) > 0.10) {
-        await prisma.market.update({
-          where: { id: moneylineMarket.id },
-          data: { status: "SUSPENDED" },
+        await prisma.consensusOdds.upsert({
+          where: { selectionId: selection.id },
+          create: { selectionId: selection.id, odds: consensusOdds, impliedProb: avgProb, lineMovement },
+          update: { odds: consensusOdds, impliedProb: avgProb, lineMovement },
         });
-        await redis.set(`market:status:${moneylineMarket.id}`, "SUSPENDED", "EX", 300);
-        console.log(`  [ALERT] Market ${moneylineMarket.id} auto-suspended (line moved ${(lineMovement * 100).toFixed(1)}%)`);
-      }
 
-      synced++;
+        await redis.set(`odds:${selection.id}`, consensusOdds.toString(), "EX", 120);
+
+        if (Math.abs(lineMovement) > 0.10) {
+          await prisma.market.update({ where: { id: dbMarket.id }, data: { status: "SUSPENDED" } });
+          await redis.set(`market:status:${dbMarket.id}`, "SUSPENDED", "EX", 300);
+          console.log(`  [ALERT] ${dbType} market ${dbMarket.id} auto-suspended (line moved ${(lineMovement * 100).toFixed(1)}%)`);
+        }
+
+        synced++;
+      }
     }
   }
 

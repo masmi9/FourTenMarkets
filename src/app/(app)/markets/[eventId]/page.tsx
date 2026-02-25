@@ -53,6 +53,7 @@ export default async function EventPage({
       {/* Markets */}
       <EventMarkets
         eventId={event.id}
+        eventLabel={`${event.awayTeam} @ ${event.homeTeam}`}
         markets={event.markets.map((m) => ({
           id: m.id,
           name: m.name,

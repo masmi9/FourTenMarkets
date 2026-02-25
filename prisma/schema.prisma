@@ -25,6 +25,7 @@ model User {
   wallet       Wallet?
   betRequests  BetRequest[]
   bets         Bet[]
+  parlays      Parlay[]
 }
 
 enum Role {
@@ -135,6 +136,52 @@ enum MarketType {
   PLAYER_PROP
 }
 
+// ─────────────────────────────────────────
+// Parlays
+// ─────────────────────────────────────────
+
+model Parlay {
+  id              String       @id @default(cuid())
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stake           Decimal      @db.Decimal(12, 2)
+  combinedOdds    Int
+  potentialPayout Decimal      @db.Decimal(12, 2)
+  status          ParlayStatus @default(PENDING)
+  placedAt        DateTime     @default(now())
+
+  legs            ParlayLeg[]
+
+  @@index([userId, status])
+}
+
+model ParlayLeg {
+  id            String    @id @default(cuid())
+  parlayId      String
+  parlay        Parlay    @relation(fields: [parlayId], references: [id], onDelete: Cascade)
+  selectionId   String
+  selection     Selection @relation(fields: [selectionId], references: [id])
+  requestedOdds Int
+  acceptedOdds  Int
+  result        LegResult @default(PENDING)
+}
+
+enum ParlayStatus {
+  PENDING
+  ACTIVE
+  WON
+  LOST
+  VOIDED
+}
+
+enum LegResult {
+  PENDING
+  WON
+  LOST
+  VOID
+  PUSHED
+}
+
 enum MarketStatus {
   OPEN
   SUSPENDED
@@ -153,6 +200,7 @@ model Selection {
   betRequests   BetRequest[]
   bets          Bet[]
   position      Position?
+  parlayLegs    ParlayLeg[]
 }
 
 model OddsLine {

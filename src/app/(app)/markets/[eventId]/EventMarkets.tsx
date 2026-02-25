@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatOdds } from "@/lib/odds-utils";
 import BetSlip from "@/components/bet-slip/BetSlip";
+import { useParlay } from "@/context/ParlayContext";
 
 interface Selection {
   id: string;
@@ -23,13 +24,40 @@ interface Market {
   selections: Selection[];
 }
 
+const MARKET_TYPE_LABEL: Record<string, string> = {
+  MONEYLINE: "Moneyline",
+  SPREAD: "Spread",
+  TOTAL: "Total",
+  PLAYER_PROP: "Player Prop",
+};
+
 export default function EventMarkets({
+  eventId,
+  eventLabel,
   markets,
 }: {
   eventId: string;
+  eventLabel: string;
   markets: Market[];
 }) {
   const [activeSelection, setActiveSelection] = useState<Selection | null>(null);
+  const { addLeg, hasLeg } = useParlay();
+
+  function handleAddToParlay(market: Market, selection: Selection) {
+    const marketType = MARKET_TYPE_LABEL[market.type] ?? market.type;
+    const selectionName = selection.line
+      ? `${selection.name} ${selection.line}`
+      : selection.name;
+
+    addLeg({
+      selectionId: selection.id,
+      selectionName,
+      eventLabel,
+      marketType,
+      consensusOdds: selection.consensus?.odds ?? -110,
+      requestedOdds: selection.consensus?.odds ?? -110,
+    });
+  }
 
   return (
     <>
@@ -47,61 +75,91 @@ export default function EventMarkets({
 
             {/* Selections */}
             <div className="p-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {market.selections.map((selection) => (
-                <button
-                  key={selection.id}
-                  onClick={() => setActiveSelection(selection)}
-                  disabled={market.status !== "OPEN"}
-                  className="flex items-center justify-between p-4 bg-brand-surface rounded-lg border border-border hover:border-primary/60 hover:bg-accent transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <div>
-                    <p className="font-medium text-sm">
-                      {selection.name}
-                      {selection.line ? (
-                        <span className="text-muted-foreground"> {selection.line}</span>
-                      ) : null}
-                    </p>
-                    {selection.consensus?.lineMovement !== undefined &&
-                      selection.consensus.lineMovement !== 0 && (
-                        <p
-                          className={`text-xs mt-0.5 ${
-                            selection.consensus.lineMovement > 0
-                              ? "text-brand-green"
-                              : "text-brand-red"
-                          }`}
-                        >
-                          {selection.consensus.lineMovement > 0 ? "▲" : "▼"}{" "}
-                          {Math.abs(selection.consensus.lineMovement * 100).toFixed(1)}%
-                        </p>
-                      )}
-                  </div>
-
-                  <div className="text-right">
-                    {selection.consensus ? (
-                      <p
-                        className={`text-xl font-bold ${
-                          selection.consensus.odds > 0
-                            ? "text-brand-green"
-                            : "text-foreground"
-                        }`}
-                      >
-                        {formatOdds(selection.consensus.odds)}
+              {market.selections.map((selection) => {
+                const inParlay = hasLeg(selection.id);
+                return (
+                  <div
+                    key={selection.id}
+                    className={`flex items-center justify-between p-4 bg-brand-surface rounded-lg border transition-all ${
+                      inParlay
+                        ? "border-primary/60 bg-primary/5"
+                        : "border-border"
+                    } ${market.status !== "OPEN" ? "opacity-50" : ""}`}
+                  >
+                    {/* Left: name + line + movement */}
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm">
+                        {selection.name}
+                        {selection.line && (
+                          <span className="text-muted-foreground"> {selection.line}</span>
+                        )}
                       </p>
-                    ) : (
-                      <p className="text-muted-foreground text-sm">N/A</p>
-                    )}
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Tap to bet
-                    </p>
+                      {selection.consensus?.lineMovement !== undefined &&
+                        selection.consensus.lineMovement !== 0 && (
+                          <p
+                            className={`text-xs mt-0.5 ${
+                              selection.consensus.lineMovement > 0
+                                ? "text-brand-green"
+                                : "text-brand-red"
+                            }`}
+                          >
+                            {selection.consensus.lineMovement > 0 ? "▲" : "▼"}{" "}
+                            {Math.abs(selection.consensus.lineMovement * 100).toFixed(1)}%
+                          </p>
+                        )}
+                    </div>
+
+                    {/* Right: odds + action buttons */}
+                    <div className="flex items-center gap-3 ml-2 flex-shrink-0">
+                      <div className="text-right">
+                        {selection.consensus ? (
+                          <p
+                            className={`text-xl font-bold ${
+                              selection.consensus.odds > 0
+                                ? "text-brand-green"
+                                : "text-foreground"
+                            }`}
+                          >
+                            {formatOdds(selection.consensus.odds)}
+                          </p>
+                        ) : (
+                          <p className="text-muted-foreground text-sm">N/A</p>
+                        )}
+                      </div>
+
+                      {market.status === "OPEN" && (
+                        <div className="flex flex-col gap-1">
+                          {/* Single bet button */}
+                          <button
+                            onClick={() => setActiveSelection(selection)}
+                            className="px-2 py-1 text-xs bg-primary/15 text-primary rounded hover:bg-primary/25 transition-colors font-medium"
+                          >
+                            Bet
+                          </button>
+                          {/* Add to parlay button */}
+                          <button
+                            onClick={() => handleAddToParlay(market, selection)}
+                            disabled={inParlay}
+                            className={`px-2 py-1 text-xs rounded transition-colors font-medium ${
+                              inParlay
+                                ? "bg-primary/30 text-primary cursor-default"
+                                : "bg-accent hover:bg-accent/80 text-foreground"
+                            }`}
+                          >
+                            {inParlay ? "✓ Parlay" : "+ Parlay"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Bet Slip drawer */}
+      {/* Single-bet slip drawer */}
       {activeSelection && (
         <BetSlip
           selection={activeSelection}
@@ -113,15 +171,9 @@ export default function EventMarkets({
 }
 
 function MarketTypeBadge({ type }: { type: string }) {
-  const labels: Record<string, string> = {
-    MONEYLINE: "Moneyline",
-    SPREAD: "Spread",
-    TOTAL: "Total",
-    PLAYER_PROP: "Player Prop",
-  };
   return (
     <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-      {labels[type] ?? type}
+      {MARKET_TYPE_LABEL[type] ?? type}
     </span>
   );
 }
