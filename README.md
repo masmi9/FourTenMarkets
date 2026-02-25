@@ -20,10 +20,36 @@ Traditional sportsbooks set fixed odds. FourTen Markets inverts that: you reques
 | Condition | Response |
 |---|---|
 | User's implied prob ≥ consensus + 2% | `ACCEPT` — platform has edge |
-| Within 5% of consensus OR near capacity | `COUNTER` — fair odds ± 4% margin |
+| Within 5% of consensus | `COUNTER` — proportional offer (never below consensus) |
 | >5% better than consensus OR over exposure | `REJECT` |
 
-Counter offers expire in 2 minutes. Users can accept or ignore.
+Counter offers are **rationalized** — the further above market your request is, the more the engine pulls the counter toward consensus. Counter offers expire in 2 minutes.
+
+---
+
+## Market Types
+
+| Type | Description |
+|---|---|
+| **Moneyline** | Straight win/loss on a team |
+| **Spread** | Against-the-spread bet with a point line (e.g. Celtics −5.5) |
+| **Total** | Over/Under on combined score (e.g. Over 224.5) |
+
+All three market types support the full Accept/Counter/Reject pricing flow.
+
+---
+
+## Parlays
+
+Build cross-game parlays from any combination of moneyline, spread, and total selections:
+
+1. Click **+ Parlay** on any selection across any game
+2. Add 2–12 legs — odds are editable per leg
+3. See live combined odds and payout preview
+4. Submit as a single stake — pricing engine evaluates each leg independently
+5. Accept the parlay or negotiate the counter offer
+
+Combined odds = product of each leg's accepted decimal odds, converted back to American. If any single leg is rejected, the entire parlay is rejected.
 
 ---
 
@@ -34,7 +60,7 @@ Counter offers expire in 2 minutes. Users can accept or ignore.
 | Frontend | Next.js 15 (App Router) + TypeScript |
 | Styling | TailwindCSS (dark theme) |
 | Database | PostgreSQL via Prisma |
-| Cache / PubSub | Redis (ioredis) |
+| Cache | Redis (ioredis) — optional in dev, degrades to DB |
 | Job Queue | BullMQ |
 | Auth | JWT + HTTP-only cookies (jose) |
 | Odds Data | [The Odds API](https://the-odds-api.com) |
@@ -46,33 +72,38 @@ Counter offers expire in 2 minutes. Users can accept or ignore.
 ```
 FourTenMarkets/
 ├── prisma/
-│   ├── schema.prisma          # Full DB schema
-│   └── seed.ts                # Sample sports, events, markets
+│   ├── schema.prisma          # Full DB schema (15 models)
+│   ├── seed.ts                # Demo users + sample events
+│   └── seed-nba.ts            # Live NBA slate from The Odds API
 ├── src/
 │   ├── app/
 │   │   ├── (auth)/            # Login + signup pages
 │   │   ├── (app)/             # Protected app pages
 │   │   │   ├── dashboard/     # Overview + recent bets
 │   │   │   ├── markets/       # Event list + event detail with bet slip
-│   │   │   ├── bets/          # Bet history + active bets
+│   │   │   ├── bets/          # Single bets + parlays history
 │   │   │   ├── wallet/        # Balance, deposit, withdraw, transactions
 │   │   │   └── admin/         # Live exposure dashboard (admin only)
 │   │   └── api/               # REST API routes
 │   │       ├── auth/          # signup, login, logout, me
 │   │       ├── bets/          # request, confirm, list
+│   │       │   └── parlay/    # parlay request + confirm
 │   │       ├── wallet/        # balance, deposit, withdraw, transactions
 │   │       ├── events/        # list, detail
 │   │       ├── sports/        # list
 │   │       └── admin/         # exposure, settle, market suspend
 │   ├── components/
-│   │   ├── bet-slip/          # BetSlip.tsx — odds input + Accept/Counter/Reject UI
+│   │   ├── bet-slip/          # BetSlip.tsx — single-bet Accept/Counter/Reject UI
+│   │   ├── parlay-slip/       # ParlaySlip.tsx — floating cross-game parlay builder
 │   │   └── layout/            # Sidebar.tsx
+│   ├── context/
+│   │   └── ParlayContext.tsx  # App-wide parlay slip state
 │   ├── lib/
-│   │   ├── pricing-engine.ts  # Accept / Counter / Reject logic
-│   │   ├── risk-engine.ts     # Exposure limits + tracking
+│   │   ├── pricing-engine.ts  # Accept / Counter / Reject (single bets)
+│   │   ├── parlay-engine.ts   # Per-leg pricing + combined odds math
 │   │   ├── settlement-engine.ts # Bet settlement + payout
 │   │   ├── odds-utils.ts      # American ↔ decimal ↔ implied probability
-│   │   ├── redis.ts           # ioredis singleton + key helpers
+│   │   ├── redis.ts           # ioredis singleton + safe wrappers
 │   │   ├── prisma.ts          # Prisma client singleton
 │   │   ├── auth.ts            # JWT sign/verify + cookie helpers
 │   │   ├── validators.ts      # Zod input schemas
@@ -104,20 +135,20 @@ cp .env.example .env
 Edit `.env`:
 - `DATABASE_URL` — PostgreSQL connection string
 - `JWT_SECRET` — Generate with `openssl rand -base64 32`
-- `REDIS_URL` — Redis connection (default: `redis://localhost:6379`)
-- `ODDS_API_KEY` — Get a free key at [the-odds-api.com](https://the-odds-api.com) (500 req/month free tier)
+- `REDIS_URL` — Redis connection (default: `redis://localhost:6379`); optional in dev
+- `ODDS_API_KEY` — Free key at [the-odds-api.com](https://the-odds-api.com) (500 req/month)
 
 ### 3. Set up the database
 
 ```bash
-# Generate Prisma client
-npm run db:generate
-
 # Push schema to database
 npm run db:push
 
-# Seed with sample sports, events, and markets
+# Seed demo users + sample events (no API key needed)
 npm run db:seed
+
+# OR seed live NBA games from The Odds API (requires ODDS_API_KEY)
+npm run db:seed-nba
 ```
 
 ### 4. Run the app
@@ -139,16 +170,24 @@ Open [http://localhost:3000](http://localhost:3000)
 | `demo@fourtenmarkets.com` | `Demo123!` | User |
 | `admin@fourtenmarkets.com` | `Admin123!` | Admin |
 
-### Placing a Bet
+### Placing a Single Bet
 
 1. Go to **Markets** → click any event
-2. Click a selection (e.g. "Sacramento Kings" on the moneyline)
+2. Click **Bet** on a selection (moneyline, spread, or total)
 3. Enter your **requested odds** (American format: `+150`, `-110`, etc.)
 4. Enter your **stake**
 5. Click **Request Odds** — response in <500ms:
    - **Accept** → bet placed automatically
-   - **Counter** → you see our best offer, click to confirm (expires 2 min)
-   - **Reject** → reason shown, try different odds
+   - **Counter** → see the rationalized best offer, click to confirm (2 min window)
+   - **Reject** → reason shown
+
+### Building a Parlay
+
+1. Click **+ Parlay** on any selection across any game
+2. The **Parlay Slip** (bottom-right) tracks your legs
+3. Edit per-leg odds — combined odds update live
+4. Enter a single stake and click **Request N-Leg Parlay**
+5. Accept or confirm the counter offer
 
 ### Admin — Settle an Event
 
@@ -184,11 +223,18 @@ GET /api/events?sport=nba&status=UPCOMING
 GET /api/events/:id
 ```
 
-### Bets
+### Single Bets
 ```
 POST /api/bets/request   { selectionId, requestedOdds, stake }
 POST /api/bets/confirm   { requestId }
-GET  /api/bets?status=ACTIVE
+GET  /api/bets
+```
+
+### Parlays
+```
+POST /api/bets/parlay          { legs: [{ selectionId, requestedOdds }], stake }
+POST /api/bets/parlay/confirm  { parlayId }
+GET  /api/bets/parlay
 ```
 
 ### Wallet
@@ -212,42 +258,60 @@ POST /api/admin/settle        { eventId, results }
 
 **File:** `src/lib/pricing-engine.ts`
 
-**Hot path** (all Redis, no DB reads):
+**Hot path** (Redis-first, DB fallback):
 1. Load `odds:{selectionId}` from Redis (consensus odds, TTL 120s)
 2. Load `exposure:{selectionId}` from Redis (live liability)
-3. Load `daily_stake:{userId}:{date}` from Redis (user's daily volume)
-4. Run decision matrix → Accept / Counter / Reject
-5. Return result in <50ms
+3. Load `daily_stake:{userId}:{date}` from Redis
+4. Calculate edge = userImpliedProb − consensusImpliedProb
+5. Interpolate counter value proportionally across the edge range
+6. Return result in <50ms
+
+**Counter rationalization:**
+- Edge range: −5% (reject boundary) → +2% (accept boundary)
+- `position = (edge − threshold_reject) / edge_range`
+- `counterProb = lerp(consensusProb, userProb, position)`
+- Counter is floored at the consensus line — never offers less than what's publicly shown
 
 **On bet confirm:**
 - `INCRBY exposure:{selectionId} {liability}` — atomic Redis increment
 - Lock stake in wallet (`lockedBalance += stake`)
-- Write `Bet` record to PostgreSQL
+- Write `Bet` or `Parlay` record to PostgreSQL
 
 ---
 
 ## Risk Limits
 
-Configured as constants in `src/lib/pricing-engine.ts`:
-
 | Limit | Default |
 |---|---|
 | Max selection exposure | $50,000 |
 | Exposure warn threshold | 90% of max |
-| Max single bet stake | $5,000 |
+| Max single bet / parlay stake | $5,000 |
 | Max daily stake per user | $25,000 |
-| Platform margin (counter juice) | 4% |
+| Parlay max legs | 12 |
 | Auto-suspend on line movement | >10% |
+
+---
+
+## Live Odds
+
+`npm run db:seed-nba` fetches the next 48 hours of NBA games from The Odds API and seeds:
+- Real event matchups with actual tip-off times
+- Moneyline, spread, and total markets
+- Consensus odds averaged across all available bookmakers (DraftKings, FanDuel, BetMGM, etc.)
+
+The `odds-sync` worker refreshes all markets every 60 seconds when running. Each seed run consumes **1 API request** from the free tier (500/month).
 
 ---
 
 ## Roadmap
 
 - [x] Phase 1 — Foundation (auth, wallet, DB schema)
-- [x] Phase 2 — Pricing engine (Accept/Counter/Reject)
-- [x] Phase 3 — Bet flow (request → confirm → settle)
-- [ ] Phase 4 — Socket.io live odds push
-- [ ] Phase 5 — The Odds API live data worker
-- [ ] Phase 6 — Spread / Total / Player Prop markets
-- [ ] Phase 7 — Stripe payment processing
-- [ ] Phase 8 — Deploy (Vercel + Railway)
+- [x] Phase 2 — Pricing engine (Accept/Counter/Reject with rationalized counters)
+- [x] Phase 3 — Single bet flow (request → confirm → settle)
+- [x] Phase 4 — Live NBA slate (The Odds API integration)
+- [x] Phase 5 — Spread + Total markets
+- [x] Phase 6 — Cross-game parlays (2–12 legs, floating slip)
+- [ ] Phase 7 — Socket.io live odds push
+- [ ] Phase 8 — Player props
+- [ ] Phase 9 — Stripe payment processing
+- [ ] Phase 10 — Deploy (Vercel + Railway)
