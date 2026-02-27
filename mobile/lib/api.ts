@@ -4,7 +4,7 @@ import { getToken } from "./storage";
 const BASE_URL =
   (Constants.expoConfig?.extra?.apiUrl as string) ||
   process.env.EXPO_PUBLIC_API_URL ||
-  "http://localhost:3000";
+  "http://localhost:3333";
 
 async function apiFetch<T = unknown>(
   path: string,

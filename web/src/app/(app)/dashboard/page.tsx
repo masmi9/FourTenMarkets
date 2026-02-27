@@ -85,8 +85,8 @@ export default async function DashboardPage() {
       <div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Recent Bets</h2>
-          <Link href="/bets" className="text-sm text-primary hover:underline">
-            View all
+          <Link href="/bets?tab=history" className="text-sm text-primary hover:underline">
+            View history
           </Link>
         </div>
 

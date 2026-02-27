@@ -48,14 +48,30 @@ function norm(s: string) {
   return s.toLowerCase().trim();
 }
 
+/**
+ * Fuzzy team name match — handles minor variations between how team names
+ * are stored in our DB vs returned by The Odds API scores endpoint.
+ * e.g. "LA Clippers" ↔ "Los Angeles Clippers", or nickname-only matches.
+ */
+function fuzzyTeamMatch(a: string, b: string): boolean {
+  const na = norm(a);
+  const nb = norm(b);
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // Match on the last word (team nickname), e.g. "Raptors" = "Raptors"
+  const aLast = na.split(/\s+/).pop() ?? "";
+  const bLast = nb.split(/\s+/).pop() ?? "";
+  return aLast.length > 3 && aLast === bLast;
+}
+
 function matchScore(
   score: OddsApiScore,
   event: { externalId: string | null; homeTeam: string; awayTeam: string }
 ): boolean {
   if (event.externalId && event.externalId === score.id) return true;
   return (
-    norm(score.home_team) === norm(event.homeTeam) &&
-    norm(score.away_team) === norm(event.awayTeam)
+    fuzzyTeamMatch(score.home_team, event.homeTeam) &&
+    fuzzyTeamMatch(score.away_team, event.awayTeam)
   );
 }
 
@@ -83,13 +99,13 @@ function buildResults(
         if (!winner) {
           results[sel.id] = "VOID";
         } else {
-          results[sel.id] = sel.name === winner ? "WON" : "LOST";
+          results[sel.id] = fuzzyTeamMatch(sel.name, winner) ? "WON" : "LOST";
         }
       } else if (market.type === "SPREAD") {
         if (!sel.line) continue;
         const spread = parseFloat(sel.line);
         if (isNaN(spread)) continue;
-        const isHome = norm(sel.name) === norm(homeTeam);
+        const isHome = fuzzyTeamMatch(sel.name, homeTeam);
         const teamScore = isHome ? homeScore : awayScore;
         const oppScore = isHome ? awayScore : homeScore;
         const adjusted = teamScore + spread;
@@ -192,11 +208,15 @@ export async function runAutoSettle(): Promise<AutoSettleResult> {
         continue;
       }
 
+      // Use scoreEntry.home_team/away_team (from the API response) to look up
+      // scores — these are guaranteed to match scoreEntry.scores[].name since
+      // they come from the same payload. Using event.homeTeam here would fail
+      // whenever our DB name differs slightly from the API name.
       const homeScoreEntry = scoreEntry.scores.find(
-        (s) => norm(s.name) === norm(event.homeTeam)
+        (s) => norm(s.name) === norm(scoreEntry.home_team)
       );
       const awayScoreEntry = scoreEntry.scores.find(
-        (s) => norm(s.name) === norm(event.awayTeam)
+        (s) => norm(s.name) === norm(scoreEntry.away_team)
       );
 
       if (!homeScoreEntry || !awayScoreEntry) {

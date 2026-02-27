@@ -4,12 +4,12 @@
     "slug": "fourten-markets",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/fourten-logo.png",
     "scheme": "fourtenmarkets",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/images/fourten-logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#0f1117"
     },
@@ -19,7 +19,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "foregroundImage": "./assets/images/fourten-logo.png",
         "backgroundColor": "#0f1117"
       },
       "package": "com.fourtenmarkets.app",
@@ -32,13 +32,15 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-build-properties",
+      "./plugins/withGradleWrapper"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "",
+      "apiUrl": "https://fourtenmarkets-production.up.railway.app",
       "router": {},
       "eas": {
         "projectId": "bef8a742-64cc-475c-bdec-544fc7e28fa3"

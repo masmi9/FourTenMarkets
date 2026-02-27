@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatOdds } from "@/lib/odds-utils";
 import { Prisma } from "@prisma/client";
+import Link from "next/link";
 
 type BetWithRelations = Prisma.BetGetPayload<{
   include: {
@@ -33,7 +34,12 @@ type ParlayWithLegs = Prisma.ParlayGetPayload<{
   };
 }>;
 
-export default async function BetsPage() {
+export default async function BetsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { tab = "active" } = await searchParams;
   const user = await getAuthUser();
   if (!user) return null;
 
@@ -83,8 +89,13 @@ export default async function BetsPage() {
     bets.reduce((sum, b) => sum + parseFloat(b.stake.toString()), 0) +
     parlays.reduce((sum, p) => sum + parseFloat(p.stake.toString()), 0);
 
+  const activeCount = active.length + activeParlays.length;
+  const historyCount = settled.length + settledParlays.length;
+  const showHistory = tab === "history";
+
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-8 space-y-6">
+      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold">My Bets</h1>
         <div className="flex gap-8 mt-3 text-sm text-muted-foreground">
@@ -106,31 +117,72 @@ export default async function BetsPage() {
         </div>
       </div>
 
-      {/* Active single bets + parlays */}
-      {(active.length > 0 || activeParlays.length > 0) && (
-        <section>
-          <h2 className="text-lg font-semibold mb-3">
-            Active ({active.length + activeParlays.length})
-          </h2>
-          <div className="space-y-3">
-            {activeParlays.map((p) => <ParlayRow key={p.id} parlay={p} />)}
-            {active.map((bet) => <BetRow key={bet.id} bet={bet} />)}
-          </div>
-        </section>
+      {/* Tab bar */}
+      <div className="flex border-b border-border">
+        <Link
+          href="/bets"
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            !showHistory
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Active
+          {activeCount > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-blue-500/20 text-blue-400">
+              {activeCount}
+            </span>
+          )}
+        </Link>
+        <Link
+          href="/bets?tab=history"
+          className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            showHistory
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          History
+          {historyCount > 0 && (
+            <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">
+              {historyCount}
+            </span>
+          )}
+        </Link>
+      </div>
+
+      {/* Active tab */}
+      {!showHistory && (
+        <>
+          {activeCount === 0 ? (
+            <div className="text-center py-16 text-muted-foreground bg-brand-card rounded-xl border border-border">
+              No active bets.{" "}
+              <Link href="/markets" className="text-primary hover:underline">
+                Browse markets
+              </Link>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {activeParlays.map((p) => <ParlayRow key={p.id} parlay={p} />)}
+              {active.map((bet) => <BetRow key={bet.id} bet={bet} />)}
+            </div>
+          )}
+        </>
       )}
 
-      {/* History */}
-      <section>
-        <h2 className="text-lg font-semibold mb-3">History</h2>
-        {settled.length === 0 && settledParlays.length === 0 ? (
-          <p className="text-muted-foreground">No settled bets yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {settledParlays.map((p) => <ParlayRow key={p.id} parlay={p} />)}
-            {settled.map((bet) => <BetRow key={bet.id} bet={bet} />)}
-          </div>
-        )}
-      </section>
+      {/* History tab */}
+      {showHistory && (
+        <>
+          {historyCount === 0 ? (
+            <p className="text-muted-foreground py-8">No settled bets yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {settledParlays.map((p) => <ParlayRow key={p.id} parlay={p} />)}
+              {settled.map((bet) => <BetRow key={bet.id} bet={bet} />)}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -155,7 +207,6 @@ function ParlayRow({ parlay }: { parlay: ParlayWithLegs }) {
             {parlay.legs.length}-Leg Parlay
           </p>
           <p className="text-xs text-muted-foreground">{formatDate(parlay.placedAt)}</p>
-          {/* Leg breakdown */}
           <div className="mt-2 space-y-0.5">
             {parlay.legs.map((leg) => (
               <div key={leg.id} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -262,4 +313,3 @@ function BetRow({ bet }: { bet: BetWithRelations }) {
     </div>
   );
 }
-

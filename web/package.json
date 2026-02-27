@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "build": "prisma generate && prisma db push && next build",
+    "start": "next start -p ${PORT:-3333}",
     "lint": "next lint",
     "db:push": "npx prisma@6.3.0 db push",
     "db:seed": "npx ts-node prisma/seed.ts",
