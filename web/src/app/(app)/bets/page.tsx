@@ -105,12 +105,22 @@ export default async function BetsPage({
   }
   const liveScores = await getLiveScores(Array.from(activeEventMap.values()));
 
-  const totalWon = settled
-    .filter((b) => b.status === "WON")
-    .reduce((sum, b) => sum + parseFloat(b.settlement?.payout.toString() ?? "0"), 0);
+  const totalWon =
+    settled
+      .filter((b) => b.status === "WON")
+      .reduce((sum, b) => sum + parseFloat(b.settlement?.payout.toString() ?? "0"), 0) +
+    settledParlays
+      .filter((p) => p.status === "WON")
+      .reduce((sum, p) => sum + parseFloat(p.potentialPayout.toString()), 0);
   const totalStaked =
     bets.reduce((sum, b) => sum + parseFloat(b.stake.toString()), 0) +
     parlays.reduce((sum, p) => sum + parseFloat(p.stake.toString()), 0);
+  const wonCount =
+    settled.filter((b) => b.status === "WON").length +
+    settledParlays.filter((p) => p.status === "WON").length;
+  const lostCount =
+    settled.filter((b) => b.status === "LOST").length +
+    settledParlays.filter((p) => p.status === "LOST").length;
 
   const activeCount = active.length + activeParlays.length;
   const historyCount = settled.length + settledParlays.length;
@@ -133,8 +143,7 @@ export default async function BetsPage({
           <span>
             Record:{" "}
             <span className="text-foreground font-medium">
-              {settled.filter((b) => b.status === "WON").length}W /{" "}
-              {settled.filter((b) => b.status === "LOST").length}L
+              {wonCount}W / {lostCount}L
             </span>
           </span>
         </div>

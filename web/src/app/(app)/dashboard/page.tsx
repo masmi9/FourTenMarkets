@@ -7,7 +7,7 @@ export default async function DashboardPage() {
   const user = await getAuthUser();
   if (!user) return null;
 
-  const [wallet, recentBets, activeBetCount] = await Promise.all([
+  const [wallet, recentBets, activeBetCount, wonBets, lostBets] = await Promise.all([
     prisma.wallet.findUnique({ where: { userId: user.userId } }),
     prisma.bet.findMany({
       where: { userId: user.userId },
@@ -23,14 +23,20 @@ export default async function DashboardPage() {
       },
     }),
     prisma.bet.count({ where: { userId: user.userId, status: "ACTIVE" } }),
+    // Count ALL settled wins/losses across single bets + parlays
+    Promise.all([
+      prisma.bet.count({ where: { userId: user.userId, status: "WON" } }),
+      prisma.parlay.count({ where: { userId: user.userId, status: "WON" } }),
+    ]).then(([b, p]) => b + p),
+    Promise.all([
+      prisma.bet.count({ where: { userId: user.userId, status: "LOST" } }),
+      prisma.parlay.count({ where: { userId: user.userId, status: "LOST" } }),
+    ]).then(([b, p]) => b + p),
   ]);
 
   const balance = wallet ? parseFloat(wallet.balance.toString()) : 0;
   const locked = wallet ? parseFloat(wallet.lockedBalance.toString()) : 0;
   const available = balance - locked;
-
-  const wonBets = recentBets.filter((b) => b.status === "WON").length;
-  const lostBets = recentBets.filter((b) => b.status === "LOST").length;
 
   return (
     <div className="p-8 space-y-8">
@@ -59,7 +65,7 @@ export default async function DashboardPage() {
           accent="default"
         />
         <StatCard
-          label="Recent Record"
+          label="Record"
           value={`${wonBets}W / ${lostBets}L`}
           accent="default"
         />

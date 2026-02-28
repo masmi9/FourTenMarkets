@@ -148,13 +148,31 @@ export async function runAutoSettle(): Promise<AutoSettleResult> {
     return result;
   }
 
-  // Events that started > 3 hours ago and are still open
-  const cutoff = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  // Events that started > 2.5 hours ago and are still open.
+  // NBA games average ~2.5 hrs; the Odds API completed flag is the final
+  // arbiter of whether a game is done, so this is just a minimum buffer
+  // to avoid checking games that are clearly still in progress.
+  const cutoff = new Date(Date.now() - 2.5 * 60 * 60 * 1000);
 
   const staleEvents = await prisma.event.findMany({
     where: {
-      status: { in: ["UPCOMING", "LIVE"] },
       startTime: { lt: cutoff },
+      OR: [
+        // Normal case: event not yet settled
+        { status: { in: ["UPCOMING", "LIVE"] } },
+        // Recovery case: event was marked SETTLED but bets are still ACTIVE
+        // (happens when settleEvent ran but produced no selectionResults)
+        {
+          status: "SETTLED",
+          markets: {
+            some: {
+              selections: {
+                some: { bets: { some: { status: "ACTIVE" } } },
+              },
+            },
+          },
+        },
+      ],
     },
     include: {
       league: { include: { sport: true } },
