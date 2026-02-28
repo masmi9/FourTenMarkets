@@ -24,8 +24,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (stored) {
         setToken(stored);
         // Verify token is still valid
-        auth.me().then((res) => {
-          setUser(res.user);
+        auth.me().then((user) => {
+          setUser(user);
         }).catch(() => {
           // Token invalid — clear it
           deleteToken();
@@ -45,7 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signup = async (email: string, password: string, name?: string) => {
-    const res = await auth.signup(email, password, name);
+    await auth.signup(email, password, name);
+    // Server signup doesn't return a token, so log in immediately to get one
+    const res = await auth.login(email, password);
     await saveToken(res.token);
     setToken(res.token);
     setUser(res.user);

@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Sidebar from "@/components/layout/Sidebar";
 import { ParlayProvider } from "@/context/ParlayContext";
 import ParlaySlip from "@/components/parlay-slip/ParlaySlip";
+import AutoRefresh from "@/components/auto-refresh";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getAuthUser();
@@ -19,6 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <ParlayProvider>
+      <AutoRefresh />
       <div className="flex min-h-screen">
         <Sidebar role={user.role} balance={available} />
         <main className="flex-1 overflow-auto">

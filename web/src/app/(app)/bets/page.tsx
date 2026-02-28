@@ -2,6 +2,7 @@ import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { formatOdds } from "@/lib/odds-utils";
+import { getLiveScores, LiveScore } from "@/lib/live-scores";
 import { Prisma } from "@prisma/client";
 import Link from "next/link";
 
@@ -81,6 +82,28 @@ export default async function BetsPage({
   const settled = bets.filter((b) => b.status !== "ACTIVE");
   const activeParlays = parlays.filter((p) => p.status === "ACTIVE");
   const settledParlays = parlays.filter((p) => p.status !== "ACTIVE");
+
+  // Fetch live scores for active bets only
+  const activeEventMap = new Map<string, {
+    id: string;
+    externalId: string | null;
+    homeTeam: string;
+    awayTeam: string;
+    sportKey: string;
+  }>();
+  for (const bet of active) {
+    const ev = bet.selection.market.event;
+    if (!activeEventMap.has(ev.id)) {
+      activeEventMap.set(ev.id, {
+        id: ev.id,
+        externalId: (ev as { externalId?: string | null }).externalId ?? null,
+        homeTeam: ev.homeTeam,
+        awayTeam: ev.awayTeam,
+        sportKey: ev.league.sport.key,
+      });
+    }
+  }
+  const liveScores = await getLiveScores(Array.from(activeEventMap.values()));
 
   const totalWon = settled
     .filter((b) => b.status === "WON")
@@ -164,7 +187,13 @@ export default async function BetsPage({
           ) : (
             <div className="space-y-3">
               {activeParlays.map((p) => <ParlayRow key={p.id} parlay={p} />)}
-              {active.map((bet) => <BetRow key={bet.id} bet={bet} />)}
+              {active.map((bet) => (
+                <BetRow
+                  key={bet.id}
+                  bet={bet}
+                  liveScore={liveScores.get(bet.selection.market.event.id)}
+                />
+              ))}
             </div>
           )}
         </>
@@ -253,15 +282,28 @@ function ParlayRow({ parlay }: { parlay: ParlayWithLegs }) {
   );
 }
 
-function BetRow({ bet }: { bet: BetWithRelations }) {
+function BetRow({
+  bet,
+  liveScore,
+}: {
+  bet: BetWithRelations;
+  liveScore?: LiveScore;
+}) {
   const stake = parseFloat(bet.stake.toString());
   const payout = parseFloat(bet.potentialPayout.toString());
   const actualPayout = bet.settlement
     ? parseFloat(bet.settlement.payout.toString())
     : null;
 
+  const ev = bet.selection.market.event;
+
+  // Derive the label for the status badge
+  const isInProgress = bet.status === "ACTIVE" && liveScore?.isLive;
+  const badgeLabel = isInProgress ? "In Progress" : bet.status;
+
   const statusStyles: Record<string, string> = {
     ACTIVE: "bg-blue-500/15 text-blue-400",
+    "In Progress": "bg-yellow-500/15 text-yellow-400",
     WON: "bg-brand-green/15 text-brand-green",
     LOST: "bg-brand-red/15 text-brand-red",
     VOIDED: "bg-muted text-muted-foreground",
@@ -276,22 +318,27 @@ function BetRow({ bet }: { bet: BetWithRelations }) {
             {bet.selection.line ? ` ${bet.selection.line}` : ""}
           </p>
           <p className="text-sm text-muted-foreground">
-            {bet.selection.market.event.awayTeam} @{" "}
-            {bet.selection.market.event.homeTeam}
+            {ev.awayTeam} @ {ev.homeTeam}
           </p>
           <p className="text-xs text-muted-foreground">
             {bet.selection.market.event.league.sport.name} •{" "}
             {bet.selection.market.name} • {formatDate(bet.placedAt)}
           </p>
+          {/* Live score line */}
+          {isInProgress && liveScore.awayScore != null && liveScore.homeScore != null && (
+            <p className="text-xs font-semibold text-yellow-400 mt-0.5">
+              🔴 {ev.awayTeam} {liveScore.awayScore} — {liveScore.homeScore} {ev.homeTeam}
+            </p>
+          )}
         </div>
 
         <div className="text-right space-y-1">
           <span
             className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-              statusStyles[bet.status] ?? statusStyles.ACTIVE
+              statusStyles[badgeLabel] ?? statusStyles.ACTIVE
             }`}
           >
-            {bet.status}
+            {badgeLabel}
           </span>
           <p className="text-sm font-bold">
             {formatCurrency(stake)} @{" "}
@@ -299,7 +346,11 @@ function BetRow({ bet }: { bet: BetWithRelations }) {
               {formatOdds(bet.odds)}
             </span>
           </p>
-          {bet.status === "ACTIVE" ? (
+          {bet.status === "ACTIVE" && !isInProgress ? (
+            <p className="text-xs text-muted-foreground">
+              To win {formatCurrency(payout - stake)}
+            </p>
+          ) : bet.status === "ACTIVE" && isInProgress ? (
             <p className="text-xs text-muted-foreground">
               To win {formatCurrency(payout - stake)}
             </p>

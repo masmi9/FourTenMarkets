@@ -51,11 +51,11 @@ export const auth = {
       body: JSON.stringify({ email, password }),
     }),
   signup: (email: string, password: string, name?: string) =>
-    apiFetch<LoginResponse>("/api/auth/signup", {
+    apiFetch<{ user: AuthUser }>("/api/auth/signup", {
       method: "POST",
       body: JSON.stringify({ email, password, name }),
     }),
-  me: () => apiFetch<{ user: AuthUser }>("/api/auth/me"),
+  me: () => apiFetch<AuthUser>("/api/auth/me"),
 };
 
 // ── Events ──────────────────────────────────────────────────────────────────
